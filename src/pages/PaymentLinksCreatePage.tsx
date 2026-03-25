@@ -427,8 +427,7 @@ const PaymentLinksCreatePage = () => {
     const totalWithFee = subtotalAmount + openPayFeeAmount;
     const merchantSettlementAmount = shouldCustomerPayFee ? subtotalAmount : subtotalAmount - openPayFeeAmount;
 
-    setCreating(true);
-    const { data, error } = await db.rpc("create_merchant_payment_link", {
+    const basePayload = {
       p_secret_key: secretKey.trim(),
       p_mode: mode,
       p_link_type: type,
@@ -437,7 +436,6 @@ const PaymentLinksCreatePage = () => {
       p_currency: currency.toUpperCase(),
       p_custom_amount: type === "custom_amount" ? Number(customAmount) : null,
       p_items: type === "products" ? items : [],
-      // Use preference values
       p_collect_customer_name: shouldCollectContacts && collectName,
       p_collect_customer_email: shouldCollectContacts && collectEmail,
       p_collect_phone: shouldCollectContacts && collectPhone,
@@ -447,12 +445,25 @@ const PaymentLinksCreatePage = () => {
       p_redirect_url: afterPaymentType === "redirect" ? redirectUrl : null,
       p_call_to_action: callToAction,
       p_expires_in_minutes: null,
-      // Fee handling
+    };
+
+    setCreating(true);
+    let { data, error } = await db.rpc("create_merchant_payment_link", {
+      ...basePayload,
       p_fee_payer: shouldCustomerPayFee ? "customer" : "merchant",
       p_fee_amount: openPayFeeAmount,
       p_merchant_settlement_amount: merchantSettlementAmount,
       p_openpay_fee_account: feeAccount,
     });
+
+    const missingFeeSignature =
+      !!error &&
+      /Could not find the function public\.create_merchant_payment_link/i.test(String(error.message || ""));
+    if (missingFeeSignature) {
+      const retry = await db.rpc("create_merchant_payment_link", basePayload);
+      data = retry.data;
+      error = retry.error;
+    }
     setCreating(false);
 
     if (error) {
